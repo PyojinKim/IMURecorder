@@ -3,7 +3,8 @@
 //  IMURecorder
 //
 //  Created by Yan Hang on 12/27/16.
-//  Copyright © 2016 Washington Universtiy. All rights reserved.
+//  Updated by Pyojin Kim on 05/27/19.
+//  Copyright © 2019 Simon Fraser University. All rights reserved.
 //
 
 import UIKit
@@ -12,15 +13,7 @@ import os.log
 
 class ViewController: UIViewController {
 	
-	let kSensor = 6
-	let GYROSCOPE = 0
-	let ACCELEROMETER = 1
-	let LINEAR_ACCELERATION = 2
-	let GRAVITY = 3
-	let MAGNETOMETER = 4
-	let ROTATION_VECTOR = 5
-	
-	// MARK: properties
+	// cellphone screen UI outlet objects
 	@IBOutlet weak var startButton: UIButton!
 	@IBOutlet weak var statusLabel: UILabel!
 	@IBOutlet weak var counterLabel: UILabel!
@@ -42,33 +35,50 @@ class ViewController: UIViewController {
 	@IBOutlet weak var oxLabel: UILabel!
 	@IBOutlet weak var oyLabel: UILabel!
 	@IBOutlet weak var ozLabel: UILabel!
+    
+    
+    // constants for collecting data
+    let kSensor = 6
+    let GYROSCOPE = 0
+    let ACCELEROMETER = 1
+    let LINEAR_ACCELERATION = 2
+    let GRAVITY = 3
+    let MAGNETOMETER = 4
+    let ROTATION_VECTOR = 5
 	
 	let sampleFrequency: TimeInterval = 200
 	let gravity: Double = 9.81
-	
+    
+    var isRecording: Bool = false
+    let defaultValue: Double = 0.0
+    
+    
+    // motion manager and queue instances
 	let motionManager: CMMotionManager = CMMotionManager()
 	let customQueue: DispatchQueue = DispatchQueue(label: "edu.wustl.cse.IMURecorder.customQueue")
+    
+    
+    // variables for measuring time in iOS clock
 	var recordingTimer: Timer = Timer()
-	var secondCounter:Int64 = 0{
-		didSet{
+	var secondCounter: Int64 = 0 {
+		didSet {
 			statusLabel.text = interfaceIntTime(second: secondCounter)
 		}
 	}
-	var recordCounter:Int64 = 0{
-		didSet{
+	var recordCounter: Int64 = 0 {
+		didSet {
 			counterLabel.text = "\(self.recordCounter)"
 		}
 	}
-	
 	let mulSecondToNanoSecond: Double = 1000000000
-	
-	var isRecording: Bool = false
-	let defaultValue: Double = 0.0
-	
+    
+    
+    // text file input & output
 	var fileHandlers = [FileHandle]()
 	var fileURLs = [URL]()
 	var fileNames: [String] = ["gyro.txt", "acce.txt", "linacce.txt", "gravity.txt", "magnet.txt", "game_rv.txt"]
 	
+    
 	override func viewDidLoad() {
 		super.viewDidLoad()
 		// Do any additional setup after loading the view, typically from a nib.
@@ -79,17 +89,20 @@ class ViewController: UIViewController {
 		}
 	}
 	
+    
 	override func didReceiveMemoryWarning() {
 		super.didReceiveMemoryWarning()
 		// Dispose of any resources that can be recreated.
 	}
 	
+    
 	override func viewWillDisappear(_ animated: Bool) {
 		self.customQueue.sync {
 			self.stopIMUUpdate()
 		}
 	}
 	
+    
 	// MARK: Actions
 	@IBAction func startStopRecording(_ sender: UIButton) {
 		if self.isRecording == false{
@@ -310,6 +323,7 @@ class ViewController: UIViewController {
 
 	}
 	
+    
 	private func stopIMUUpdate(){
 		if self.motionManager.isGyroActive{
 			self.motionManager.stopGyroUpdates()
@@ -325,8 +339,9 @@ class ViewController: UIViewController {
 		}
 	}
 	
-	// MARK: Utility functions
-	private func interfaceIntTime(second: Int64) -> String{
+    
+	// MARK: utility functions
+	private func interfaceIntTime(second: Int64) -> String {
 		var input = second;
 		let hours: Int64 = input / 3600;
 		input = input % 3600;
@@ -339,7 +354,7 @@ class ViewController: UIViewController {
 		return String(format: "%02d:%02d:%02d", hours, mins, secs)
 	}
 	
-	private func errorMsg(msg: String){
+	private func errorMsg(msg: String) {
 		DispatchQueue.main.async {
 			let fileAlert = UIAlertController(title: "IMURecorder", message: msg, preferredStyle: .alert)
 			fileAlert.addAction(UIAlertAction(title: "OK", style: .cancel, handler: nil))
