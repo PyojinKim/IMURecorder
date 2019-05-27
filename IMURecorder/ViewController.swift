@@ -53,8 +53,11 @@ class ViewController: UIViewController {
     let defaultValue: Double = 0.0
     
     
-    // motion manager and queue instances
-	let motionManager: CMMotionManager = CMMotionManager()
+    // various motion managers and queue instances
+	let motionManager = CMMotionManager()
+    // let pedometer = CMPedometer()
+    // let motionActivityManager = CMMotionActivityManager()
+    // let altimeter = CMAltimeter()
 	let customQueue: DispatchQueue = DispatchQueue(label: "edu.wustl.cse.IMURecorder.customQueue")
     
     
@@ -76,17 +79,17 @@ class ViewController: UIViewController {
     // text file input & output
 	var fileHandlers = [FileHandle]()
 	var fileURLs = [URL]()
-	var fileNames: [String] = ["gyro.txt", "acce.txt", "linacce.txt", "gravity.txt", "magnet.txt", "game_rv.txt"]
+	var fileNames: [String] = ["gyro.txt", "accel.txt", "linaccel.txt", "gravity.txt", "magnet.txt", "orientation.txt"]
 	
     
 	override func viewDidLoad() {
 		super.viewDidLoad()
 		// Do any additional setup after loading the view, typically from a nib.
-		self.statusLabel.text = "Standby"
+        self.statusLabel.text = "Ready to record data"
 		
 		self.customQueue.async {
 			self.startIMUUpdate()
-		}
+        }
 	}
 	
     
@@ -105,10 +108,10 @@ class ViewController: UIViewController {
     
 	// MARK: Actions
 	@IBAction func startStopRecording(_ sender: UIButton) {
-		if self.isRecording == false{
+		if (self.isRecording == false) {
 			// start recording
 			customQueue.async {
-				if self.createFiles(){
+				if self.createFiles() {
 					DispatchQueue.main.async {
 						// reset timer
 						self.secondCounter = 0
@@ -125,14 +128,14 @@ class ViewController: UIViewController {
 					}
 					
 					self.isRecording = true;
-				}else{
+				} else {
 					self.errorMsg(msg: "Failed to create the file")
 					return
 				}
 			}
-		}else{
+		} else {
 			// stop recording and share file
-			if recordingTimer.isValid{
+			if recordingTimer.isValid {
 				recordingTimer.invalidate()
 			}
 			
@@ -176,15 +179,85 @@ class ViewController: UIViewController {
 			UIApplication.shared.isIdleTimerDisabled = false
 		}
 	}
+    
 	
-	private func startIMUUpdate(){
-		self.motionManager.gyroUpdateInterval = 1.0 / self.sampleFrequency
-		self.motionManager.accelerometerUpdateInterval = 1.0 / self.sampleFrequency
-		self.motionManager.deviceMotionUpdateInterval = 1.0 / self.sampleFrequency
-		self.motionManager.magnetometerUpdateInterval = 1.0 / self.sampleFrequency
-		
-		// Start motion update
-		if !motionManager.isAccelerometerActive{
+	private func startIMUUpdate() {
+        
+        // define IMU update interval up to 200 Hz
+        self.motionManager.deviceMotionUpdateInterval = 1.0 / self.sampleFrequency
+        self.motionManager.accelerometerUpdateInterval = 1.0 / self.sampleFrequency
+        self.motionManager.gyroUpdateInterval = 1.0 / self.sampleFrequency
+        self.motionManager.magnetometerUpdateInterval = 1.0 / self.sampleFrequency
+        
+        
+        // 1) update device motion
+        if (!motionManager.isDeviceMotionActive) {
+            self.motionManager.startDeviceMotionUpdates(to: OperationQueue.main) { (motion: CMDeviceMotion?, error: Error?) -> Void in
+                
+                // optional binding for safety
+                if let curmotion = motion {
+                    
+                    // dispatch queue to display UI
+                    DispatchQueue.main.async {
+                        self.lxLabel.text = String(format:"%.6f", curmotion.userAcceleration.x)
+                        self.lyLabel.text = String(format:"%.6f", curmotion.userAcceleration.y)
+                        self.lzLabel.text = String(format:"%.6f", curmotion.userAcceleration.z)
+                        
+                        self.gxLabel.text = String(format:"%.6f", curmotion.gravity.x * self.gravity)
+                        self.gyLabel.text = String(format:"%.6f", curmotion.gravity.y * self.gravity)
+                        self.gzLabel.text = String(format:"%.6f", curmotion.gravity.z * self.gravity)
+                        
+                        self.oxLabel.text = String(format:"%.6f", curmotion.attitude.roll)
+                        self.oyLabel.text = String(format:"%.6f", curmotion.attitude.yaw)
+                        self.ozLabel.text = String(format:"%.6f", curmotion.attitude.pitch)
+                    }
+                    
+                    // custom queue to save IMU text data
+                    self.customQueue.async {
+                        if (self.fileHandlers.count == self.kSensor && self.isRecording) {
+                            let userAccelData = String(format: "%.0f %.6f %.6f %.6f \n",
+                                                       Date().timeIntervalSince1970 * self.mulSecondToNanoSecond, // timestamp
+                                                       curmotion.userAcceleration.x,                              // pure user acceleration in x
+                                                       curmotion.userAcceleration.y,                              // pure user acceleration in y
+                                                       curmotion.userAcceleration.z)                              // pure user acceleration in z
+                            if let userAccelDataToWrite = userAccelData.data(using: .utf8) {
+                                self.fileHandlers[self.LINEAR_ACCELERATION].write(userAccelDataToWrite)
+                            } else {
+                                os_log("Failed to write data record", log: OSLog.default, type: .fault)
+                            }
+                            
+                            let gravityData = String(format: "%.0f %.6f %.6f %.6f \n",
+                                                     Date().timeIntervalSince1970 * self.mulSecondToNanoSecond, // timestamp
+                                                     curmotion.gravity.x,                                       // gravity in x
+                                                     curmotion.gravity.y,                                       // gravity in y
+                                                     curmotion.gravity.z)                                       // gravity in z
+                            if let gravityDataToWrite = gravityData.data(using: .utf8){
+                                self.fileHandlers[self.GRAVITY].write(gravityDataToWrite)
+                            } else {
+                                os_log("Failed to write data record", log: OSLog.default, type: .fault)
+                            }
+                            
+                            // Note that the device orientation the quaternion form is recorded
+                            let attitudeData = String(format: "%.0f %.6f %.6f %.6f %.6f \n",
+                                                      Date().timeIntervalSince1970 * self.mulSecondToNanoSecond, // timestamp
+                                                      curmotion.attitude.quaternion.x,                           // orientation in x
+                                                      curmotion.attitude.quaternion.y,                           // orientation in y
+                                                      curmotion.attitude.quaternion.z,                           // orientation in z
+                                                      curmotion.attitude.quaternion.w)                           // orientation in w
+                            if let attitudeDataToWrite = attitudeData.data(using: .utf8){
+                                self.fileHandlers[self.ROTATION_VECTOR].write(attitudeDataToWrite)
+                            } else {
+                                os_log("Failed to write data record", log: OSLog.default, type: .fault)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        
+		// start motion update
+		if !motionManager.isAccelerometerActive {
 			self.motionManager.startAccelerometerUpdates(to: OperationQueue.main, withHandler: {
 				(motion: CMAccelerometerData?, error: Error?) -> Void in
 				if let curmotion = motion{
@@ -240,57 +313,7 @@ class ViewController: UIViewController {
 			})
 		}
 		
-		if !motionManager.isDeviceMotionActive{
-			self.motionManager.startDeviceMotionUpdates(to: OperationQueue.main, withHandler: {
-				(motion: CMDeviceMotion?, error: Error?) -> Void in
-				if let curmotion = motion{
-					DispatchQueue.main.async {
-						self.lxLabel.text = String(format:"%.6f", curmotion.userAcceleration.x)
-						self.lyLabel.text = String(format:"%.6f", curmotion.userAcceleration.y)
-						self.lzLabel.text = String(format:"%.6f", curmotion.userAcceleration.z)
-						
-						self.gxLabel.text = String(format:"%.6f", curmotion.gravity.x * self.gravity)
-						self.gyLabel.text = String(format:"%.6f", curmotion.gravity.y * self.gravity)
-						self.gzLabel.text = String(format:"%.6f", curmotion.gravity.z * self.gravity)
 
-                        self.oxLabel.text = String(format:"%.6f", curmotion.attitude.roll)
-						self.oyLabel.text = String(format:"%.6f", curmotion.attitude.yaw)
-						self.ozLabel.text = String(format:"%.6f", curmotion.attitude.pitch)
-					}
-					self.customQueue.async {
-						if self.fileHandlers.count == self.kSensor && self.isRecording{
-							var out_str = String(format: "%.0f %.6f %.6f %.6f\n",
-							                     Date().timeIntervalSince1970 * self.mulSecondToNanoSecond,
-							                     curmotion.userAcceleration.x, curmotion.userAcceleration.y, curmotion.userAcceleration.z)
-							if let data_to_write = out_str.data(using: .utf8){
-								self.fileHandlers[self.LINEAR_ACCELERATION].write(data_to_write)
-							}else{
-								os_log("Failed to write data record", log: OSLog.default, type: .fault)
-							}
-							
-							out_str = String(format: "%.0f %.6f %.6f %.6f\n",
-							                 Date().timeIntervalSince1970 * self.mulSecondToNanoSecond,
-							                 curmotion.gravity.x, curmotion.gravity.y, curmotion.gravity.z)
-							if let data_to_write = out_str.data(using: .utf8){
-								self.fileHandlers[self.GRAVITY].write(data_to_write)
-							}else{
-								os_log("Failed to write data record", log: OSLog.default, type: .fault)
-							}
-							
-							// Notice that for attitude, the eular angle is displayed, but the quaternion form is recorded
-							out_str = String(format: "%.0f %.6f %.6f %.6f %.6f\n",
-							                 Date().timeIntervalSince1970 * self.mulSecondToNanoSecond,
-							                 curmotion.attitude.quaternion.x, curmotion.attitude.quaternion.y, curmotion.attitude.quaternion.z, curmotion.attitude.quaternion.w)
-							if let data_to_write = out_str.data(using: .utf8){
-								self.fileHandlers[self.ROTATION_VECTOR].write(data_to_write)
-							}else{
-								os_log("Failed to write data record", log: OSLog.default, type: .fault)
-							}
-						}
-					}
-				}
-			})
-		}
 		
 		if !motionManager.isMagnetometerActive{
 			self.motionManager.startMagnetometerUpdates(to: OperationQueue.main, withHandler: {
